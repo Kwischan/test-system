@@ -1,20 +1,18 @@
 import os
 import streamlit as st
 import numpy as np
+import matplotlib.pyplot as plt
+import sklearn
+ 
 from PIL import Image
 from keras.models import load_model
-# import torch
-# from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # Load CNN Models
 model1 = load_model('official-models/LettuceModel.h5')  # saved model from training
 model2 = load_model('official-models/CauliflowerModel.h5')  # saved model from training
 model3 = load_model('official-models/SugarcaneModel-1.h5')  # saved model from training
 model4 = load_model('official-models/PepperModel.h5')  # saved model from training
-
-# # Load GPT-2 model and tokenizer
-# model_gpt2 = GPT2LMHeadModel.from_pretrained("gpt2")
-# tokenizer_gpt2 = GPT2Tokenizer.from_pretrained("gpt2")
 
 # Define plant class names
 Lettuce_names = ["lettuce_BacterialLeafSpot", "lettuce_BotrytisCrownRot", "lettuce_DownyMildew", "lettuce_Healthy"]
@@ -120,6 +118,12 @@ recommendations = {
     # Add recommendations for other classes similarly
 }
 
+# Function to display recommendations and predicted class
+def display_recommendations(predicted_class):
+    st.subheader("Recommendations:")
+    for recommendation in recommendations.get(predicted_class, []):
+        st.write(recommendation)
+
 # Function to preprocess input image
 def preprocess_image(image_path):
     img = Image.open(image_path)
@@ -128,35 +132,36 @@ def preprocess_image(image_path):
     img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
     return img_array
 
+# Function to generate plot for SVM predictions
+def generate_svm_plot(prediction_probabilities, class_names):
+    st.set_option('deprecation.showPyplotGlobalUse', False)
+    plt.figure(figsize=(10, 6))
+    plt.plot(prediction_probabilities[0], label=class_names, linestyle='-', marker='o', markersize=5)
+    plt.xlabel('Classes')
+    plt.ylabel('Probability')
+    plt.title('Prediction Probabilities')
+    plt.grid(True, which='both', linestyle='--', linewidth=0.1)
+    plt.legend(fontsize=12)
+    
+    # Display the plot
+    st.pyplot()
+    
+    # Add explanation
+    explanation = """
+    This plot shows the probability distribution across different classes.
+    Each class represents a potential disease or health status of the crop.
+    The x-axis represents the classes, while the y-axis represents the probability of each class.
+    The class with the highest probability is the predicted disease or health status.
+    """
+    st.write(explanation)
+
 # Function to predict disease using CNN model
 def predict_disease(model, image_path, names):
     preprocessed_img = preprocess_image(image_path)
     prediction = model.predict(preprocessed_img)
     disease_index = np.argmax(prediction)  # Get the index of the predicted class
     disease_class = names[disease_index]  # Fetch the class name using the index
-    return disease_class
-
-# Function to generate recommendations using GPT-2
-# def generate_recommendations(input_text):
-#     input_ids = tokenizer_gpt2.encode(input_text, return_tensors="pt")
-#     output = model_gpt2.generate(input_ids, max_length=150, num_return_sequences=1, temperature=0.7)
-#     decoded_output = tokenizer_gpt2.decode(output[0], skip_special_tokens=True)
-#     return decoded_output
-
-# Function to display recommendations and predicted class
-def display_recommendations(predicted_class):
-    st.subheader("Recommendations:")
-    for recommendation in recommendations.get(predicted_class, []):
-        st.write(recommendation)
-
-# Function to generate a Feedback form
-def feedback():
-    with st.form(key="my_form"):
-        st.subheader("Feedback*",divider="gray")
-        c1, c2 = st.columns(2)
-        feed = c1.text_area("message",placeholder="Write a message...",label_visibility="collapsed",)
-        b1 = c2.form_submit_button("Send",use_container_width=True)
-        b2 = c2.form_submit_button("Cancel",use_container_width=True)
+    return prediction, disease_class  # Return prediction along with disease class
 
 # Sidebar content
 with st.sidebar:
@@ -179,7 +184,7 @@ with st.sidebar:
     # crop_type = st.sidebar.selectbox("Select Crop Type", ["Cauliflower", "Pepper", "Sugarcane", "Lettuce"], help="Choose the type of crop for analysis")
 
 # Main content
-tab1, tab2, tab3 = st.tabs(["Home", "Crop Health Assessment", "About Crop Health Assessment"])
+tab1, tab2, tab3 = st.tabs(["Home", "Crop Health Assessment", "Feedback"])
 
 with tab1:
     st.title("Welcome to Crop Health Assessment App",False)
@@ -214,27 +219,32 @@ with tab1:
     """)
 
 with tab2:
+    st.title("Crop Health Assessment")
+
     # selecting method for health assessment
     st.subheader("SELECT A METHOD")
-    pick = st.selectbox("Select Method",('Upload','Camera'),label_visibility="hidden")
+    pick = st.selectbox("Select Method", ('Upload', 'Camera'), label_visibility="hidden")
 
     if pick == 'Camera':
         st.subheader("Camera Input")
-        plantpic = st.camera_input("take a plant picture",label_visibility="hidden")
+        plantpic = st.camera_input("Take a plant picture", label_visibility="hidden")
         
         st.subheader("Select A Plant")
-        select = st.selectbox("Select Plant",('Lettuce','Cauliflower','Sugarcane','Pepper'),label_visibility="hidden")
+        select = st.selectbox("Select Plant", ('Lettuce', 'Cauliflower', 'Sugarcane', 'Pepper'), label_visibility="hidden")
          
-        submit = st.button("submit",use_container_width=True)
+        submit = st.button("Submit", use_container_width=True)
         
         if submit:
             if not plantpic:
-                st.write("take a photo!")
+                st.write("Please take a photo!")
             else:
+                # Perform prediction and display results
+                st.subheader("Prediction: ")
+                
                 if select == 'Lettuce':
                     # Predict Lettuce disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model1, image_path, Lettuce_names)
+                    prediction, predicted_class = predict_disease(model1, image_path, Lettuce_names)
                     pred1 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred1, use_column_width=True)
 
@@ -245,11 +255,15 @@ with tab2:
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
-
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
+                    
                 elif select == 'Cauliflower':
                     # Predict Cauliflower disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model2, image_path, Cauliflower_names)
+                    prediction, predicted_class = predict_disease(model2, image_path, Cauliflower_names)
                     pred2 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred2, use_column_width=True)
 
@@ -260,11 +274,15 @@ with tab2:
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
                 elif select == 'Sugarcane':
                     # Predict Sugarcane disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model3, image_path, Sugarcane_names)
+                    prediction, predicted_class = predict_disease(model3, image_path, Sugarcane_names)
                     pred3 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred3, use_column_width=True)
 
@@ -275,11 +293,15 @@ with tab2:
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
                 elif select == 'Pepper':
                     # Predict Pepper disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model4, image_path, Pepper_names)
+                    prediction, predicted_class = predict_disease(model4, image_path, Pepper_names)
                     pred4 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred4, use_column_width=True)
 
@@ -291,93 +313,122 @@ with tab2:
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
                     
-                    feedback()
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
     elif pick == 'Upload':
         st.subheader("Upload Image File")
-        plantpic = st.file_uploader("upload",['jpg','png','gif','webp','tiff','psd','raw','bmp','jfif'],False,label_visibility="hidden")
+        plantpic = st.file_uploader("Upload an image", ['jpg', 'png', 'gif', 'webp', 'tiff', 'psd', 'raw', 'bmp', 'jfif'], False, label_visibility="hidden")
         
         st.subheader("Select A Plant")
-        select = st.selectbox("Select Plant",('Lettuce','Cauliflower','Sugarcane','Pepper'),label_visibility="hidden")
+        select = st.selectbox("Select Plant", ('Lettuce', 'Cauliflower', 'Sugarcane', 'Pepper'), label_visibility="hidden")
         
-        submit1 = st.button("submit",use_container_width=True)
+        submit1 = st.button("Submit", use_container_width=True)
+        
         if submit1:
             if not plantpic:
-                st.write("take a photo!")
+                st.write("Please upload an image!")
             else:
+                # Perform prediction and display results
+                st.subheader("Prediction: ")
+                
                 if select == 'Lettuce':
                     # Predict Lettuce disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model1, image_path, Lettuce_names)
+                    prediction, predicted_class = predict_disease(model1, image_path, Lettuce_names)
                     pred1 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred1, use_column_width=True)
 
                     # Generate and display recommendations
                     input_text = "Lettuce " + predicted_class + ":"
                     # generated_recommendations = generate_recommendations(input_text)
-                   # st.write(generated_recommendations)
+                    # st.write(generated_recommendations)
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
                 elif select == 'Cauliflower':
                     # Predict Cauliflower disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model2, image_path, Cauliflower_names)
+                    prediction, predicted_class = predict_disease(model2, image_path, Cauliflower_names)
                     pred2 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred2, use_column_width=True)
 
                     # Generate and display recommendations
                     input_text = "Cauliflower " + predicted_class + ":"
                     # generated_recommendations = generate_recommendations(input_text)
-                   # st.write(generated_recommendations)
+                    # st.write(generated_recommendations)
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
                 elif select == 'Sugarcane':
                     # Predict Sugarcane disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model3, image_path, Sugarcane_names)
+                    prediction, predicted_class = predict_disease(model3, image_path, Sugarcane_names)
                     pred3 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred3, use_column_width=True)
 
                     # Generate and display recommendations
                     input_text = "Sugarcane " + predicted_class + ":"
                     # generated_recommendations = generate_recommendations(input_text)
-                   # st.write(generated_recommendations)
+                    # st.write(generated_recommendations)
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
+                    
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
                 elif select == 'Pepper':
                     # Predict Pepper disease
                     image_path = plantpic
-                    predicted_class = predict_disease(model4, image_path, Pepper_names)
+                    prediction, predicted_class = predict_disease(model4, image_path, Pepper_names)
                     pred4 = "Predicted Disease Class: " + predicted_class
                     st.image(plantpic, pred4, use_column_width=True)
 
                     # Generate and display recommendations
                     input_text = "Pepper " + predicted_class + ":"
                     # generated_recommendations = generate_recommendations(input_text)
-                    ## st.write(generated_recommendations)
+                    # st.write(generated_recommendations)
 
                     # Display specific recommendations for the predicted class
                     display_recommendations(predicted_class)
                     
-                    feedback()
+                    # Generate SVM plot
+                    st.subheader("Prediction Probabilities:")
+                    generate_svm_plot(prediction, predicted_class)
 
 with tab3:
+    st.title("Feedback")
+
+    st.subheader("Feedback Form")
+    feedback = st.text_area("Share your feedback with us...", help="Let us know how we can improve this app!")
+    submit2 = st.button("Submit Feedback")
+
+    if submit2:
+        if feedback:
+            # Submit feedback to database or log file
+            st.success("Thank you for your feedback! We'll use it to improve the app.")
+        else:
+            st.warning("Please provide feedback before submitting.")
+
+# Footer
+st.markdown(
     """
-    The "Deep Learning and Machine Learning Integration: A Comprehensive Approach to Automated Crop Health Assessment Using CNN, ANN, and SVM" project aims to revolutionize crop health assessment in agriculture through cutting-edge technology and advanced machine learning techniques. By leveraging Convolutional Neural Networks (CNN), Artificial Neural Networks (ANN), and Support Vector Machines (SVM), the project endeavors to automate the process of evaluating crop health, thereby enhancing agricultural practices and promoting sustainability.
-
-
-In this research, CNN serves as the primary tool for image processing and feature extraction from crop images, enabling the identification of visual cues indicative of crop health. The extracted features are then fed into ANN, which analyzes the data and generates recommendations or actions to be taken for diseased plants. These recommendations encompass treatment strategies, irrigation adjustments, and pest control measures, aimed at improving crop yield and minimizing losses.
-
-
-Additionally, SVM plays a crucial role in the classification of crops based on the features extracted by CNN and processed by ANN. By training SVM to classify crops into categories such as healthy, diseased, or under stress, the project achieves a comprehensive assessment of crop health, facilitating informed decision-making for farmers and agricultural stakeholders.
-
-
-Through the integration of CNN, ANN, and SVM, the project not only advances the field of automated crop health assessment but also contributes to the broader goals of precision agriculture and sustainable farming practices. By harnessing the power of deep learning and machine learning, this research endeavors to redefine how crop quality is evaluated, ultimately leading to higher crop yields, reduced losses, and a more resilient agricultural ecosystem.
-    
-    """
+    <style>
+        .reportview-container .main footer {visibility: hidden;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
